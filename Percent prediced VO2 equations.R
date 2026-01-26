@@ -60,6 +60,11 @@ assert_required_cols <- function(df, required) {
 # Equations (all return ml/min)
 # ============================================================
 
+# -------------------------------------------------------------------
+# Cooper — WEIGHT-based VO2max (children)
+# J Appl Physiol 1984
+# -------------------------------------------------------------------
+
 pred_cooper_weight <- function(sex, weight) {
   sex <- normalize_sex(sex)
   if (sex == "Male") {
@@ -69,6 +74,11 @@ pred_cooper_weight <- function(sex, weight) {
   }
 }
 
+# -------------------------------------------------------------------
+# Cooper — HEIGHT-based VO2max (children)
+# Am Rev Respir Dis 1984
+# -------------------------------------------------------------------
+
 pred_cooper_height <- function(sex, height) {
   sex <- normalize_sex(sex)
   if (sex == "Male") {
@@ -77,6 +87,11 @@ pred_cooper_height <- function(sex, height) {
     22.5 * height - 1837.8
   }
 }
+
+# -------------------------------------------------------------------
+# Hansen/Wasserman — Predicted values for clinical exercise testing
+# Am Rev Respir Dis 1984;129(2 Pt 2):S49–S55
+# -------------------------------------------------------------------
 
 pred_hansen1984 <- function(sex, age, weight, height) {
   sex <- normalize_sex(sex)
@@ -90,6 +105,13 @@ pred_hansen1984 <- function(sex, age, weight, height) {
     (wt_used + 43) * (22.78 - 0.17 * age)
   }
 }
+
+# -------------------------------------------------------------------
+# friend2018 — Adult reference equation
+# De Souza et al
+# Eur J Prev Cardiol 2018
+# Originally ml/kg/min → converted here to ml/min
+# -------------------------------------------------------------------
 
 pred_friend2018 <- function(sex, age, weight, height, test_mode = "Treadmill") {
   sex <- normalize_sex(sex)
