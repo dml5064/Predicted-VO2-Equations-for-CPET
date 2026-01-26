@@ -17,7 +17,7 @@ All predicted values are returned in **ml/min**.
    - Weight-based equation  
    - Height-based equation  
 
-2. **Hansen et al. 1984**
+2. **Hansen/Wasserman et al. 1984**
    - Clinical exercise testing reference values  
 
 3. **FRIEND Registry 2018 (Adults)**
