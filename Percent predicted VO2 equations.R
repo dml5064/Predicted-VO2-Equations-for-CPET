@@ -90,6 +90,9 @@ pred_cooper_height <- function(sex, height) {
 # ------------------------------------------------------------
 # Hansen/Wasserman — Predicted values for clinical exercise testing
 # Am Rev Respir Dis 1984;129(2 Pt 2):S49–S55
+# Implemented in the ATS/ACCP (2003) recommended simplified form:
+#   Peak VO2 (ml/min) = weight_used × (50.75 − 0.37 × age)
+# where weight_used = min(actual, ideal) if actual<than ideal.
 # ------------------------------------------------------------
 pred_hansen1984 <- function(sex, age, weight, height) {
   sex <- normalize_sex(sex)
