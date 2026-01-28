@@ -107,13 +107,34 @@ pred_hansen1984 <- function(sex, age, weight, height) {
 }
 
 # -------------------------------------------------------------------
-# friend2018 — Adult reference equation
+# friend2017_myers — FRIEND (Myers et al. 2017, Prog Cardiovasc Dis)
+# Screenshot formula:
+#   VO2max (ml/kg/min) = 79.9 - 0.39*age - 13.7*gender(0=male,1=female) - 0.127*weight[lbs]
+# Converted here to ml/min by multiplying by weight (kg)
+# -------------------------------------------------------------------
+
+pred_friend2017_myers <- function(sex, age, weight) {
+  sex <- normalize_sex(sex)
+  
+  weight_lbs <- weight * 2.20462
+  gender01 <- if (sex == "Male") 0 else 1
+  
+  vo2_ml_kg_min <- 79.9 -
+    0.39 * age -
+    13.7 * gender01 -
+    0.127 * weight_lbs
+  
+  vo2_ml_kg_min * weight
+}
+
+# -------------------------------------------------------------------
+# friend2018_desouza — Adult reference equation
 # De Souza et al
 # Eur J Prev Cardiol 2018
 # Originally ml/kg/min → converted here to ml/min
 # -------------------------------------------------------------------
 
-pred_friend2018 <- function(sex, age, weight, height, test_mode = "Treadmill") {
+pred_friend2018_desouza <- function(sex, age, weight, height, test_mode = "Treadmill") {
   sex <- normalize_sex(sex)
   test_mode <- normalize_test_mode(test_mode)
   
@@ -148,11 +169,12 @@ calc_pred_and_percent <- function(equation,
   
   pred <- switch(
     equation,
-    "cooper_weight" = pred_cooper_weight(sex, weight),
-    "cooper_height" = pred_cooper_height(sex, height),
-    "hansen1984"    = pred_hansen1984(sex, age, weight, height),
-    "friend2018"    = pred_friend2018(sex, age, weight, height, test_mode),
-    stop("Unknown equation. Use: cooper_weight, cooper_height, hansen1984, friend2018")
+    "cooper_weight"      = pred_cooper_weight(sex, weight),
+    "cooper_height"      = pred_cooper_height(sex, height),
+    "hansen1984"         = pred_hansen1984(sex, age, weight, height),
+    "friend2017_myers"   = pred_friend2017_myers(sex, age, weight),
+    "friend2018_desouza"         = pred_friend2018_desouza(sex, age, weight, height, test_mode),
+    stop("Unknown equation. Use: cooper_weight, cooper_height, hansen1984, friend2017_myers, friend2018_desouza")
   )
   
   if (!is.finite(pred) || pred <= 0) stop("Predicted VO2 is non-positive/invalid (check inputs/range).")
@@ -200,8 +222,10 @@ add_pred_vo2_columns <- function(DF,
   DF$pred_VO2_cooper_height <- mapply(function(s, h) pred_cooper_height(s, h), sex_norm, height)
   DF$pred_VO2_hansen1984     <- mapply(function(s, a, w, h) pred_hansen1984(s, a, w, h),
                                        sex_norm, age, weight, height)
-  DF$pred_VO2_friend         <- mapply(function(s, a, w, h, tm) pred_friend2018(s, a, w, h, tm),
+  DF$pred_VO2_friend         <- mapply(function(s, a, w, h, tm) pred_friend2018_desouza(s, a, w, h, tm),
                                        sex_norm, age, weight, height, test_mode_norm)
+  DF$pred_VO2_friend2017_myers <- mapply(function(s, a, w) pred_friend2017_myers(s, a, w),
+                                         sex_norm, age, weight)
   
   # combined logic: <18 -> Hansen; >=18 -> FRIEND
   DF$pred_VO2 <- ifelse(age < 18, DF$pred_VO2_hansen1984, DF$pred_VO2_friend)
@@ -233,7 +257,8 @@ if (interactive()) {
   cat("  1 = Cooper 1984 (weight-based, children) [ml/min]\n")
   cat("  2 = Cooper 1984 (height-based, children) [ml/min]\n")
   cat("  3 = Hansen 1984 (clinical exercise testing) [ml/min]\n")
-  cat("  4 = FRIEND 2018 (adult; ml/kg/min -> ml/min) [requires test mode]\n")
+  cat("  4 = FRIEND 2017 (Myers; age/sex/weight only; ml/kg/min -> ml/min)\n")
+  cat("  5 = FRIEND 2018 (adult; ml/kg/min -> ml/min) [requires test mode]\n")
   
   choice <- trimws(readline("Enter 1/2/3/4: "))
   
@@ -242,12 +267,13 @@ if (interactive()) {
     "1" = "cooper_weight",
     "2" = "cooper_height",
     "3" = "hansen1984",
-    "4" = "friend2018",
-    stop("Choice must be 1, 2, 3, or 4.")
+    "4" = "friend2017_myers",
+    "5" = "friend2018_desouza",
+    stop("Choice must be 1, 2, 3, 4, or 5.")
   )
   
   test_mode <- "Treadmill"
-  if (equation == "friend2018") {
+  if (equation == "friend2018_desouza") {
     test_mode <- normalize_test_mode(readline("Test mode (Treadmill/Cycle) [default Treadmill]: "))
   }
   
