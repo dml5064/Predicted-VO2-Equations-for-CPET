@@ -4,7 +4,7 @@
 # Equations (all return ml/min unless noted):
 #   1) Cooper 1984 (weight-based, children)  -> ml/min
 #   2) Cooper 1984 (height-based, children)  -> ml/min
-#   3) Hansen/Wasserman 1984 (clinical ET)   -> ml/min
+#   3) Hansen/Wasserman 2001 (clinical ET)   -> ml/min
 #   4) FRIEND 2017 (Myers; ml/kg/min -> ml/min)
 #   5) FRIEND 2018 (De Souza; ml/kg/min -> ml/min; treadmill/cycle)
 #
@@ -88,37 +88,49 @@ pred_cooper_height <- function(sex, height) {
 }
 
 # ------------------------------------------------------------
-# Hansen/Wasserman — Predicted values for clinical exercise testing
-# Am Rev Respir Dis 1984;129(2 Pt 2):S49–S55
-# Implemented in the ATS/ACCP (2003) recommended simplified form:
-#   Peak VO2 (ml/min) = weight_used × (50.75 − 0.37 × age)
-# where weight_used = min(actual, ideal) if actual<than ideal.
+# Hansen/Wasserman 2001 — Predicted values for clinical exercise testing
+# J. E. Hansen, Written 2001 (as cited in Principles of Exercise Testing
+# and Interpretation, Table 7.2 & 7.3)
+# Output: ml/min (converted from L/min)
+# Age floor: 30 y (use age = 30 for adults younger than 30)
 # ------------------------------------------------------------
-pred_hansen1984 <- function(sex, age, weight, height) {
+pred_hansen2001 <- function(sex, age, weight, height) {
   sex <- normalize_sex(sex)
   
-  pred_wt <- if (sex == "Male") (0.79 * height - 60.7) else (0.65 * height - 42.8)
-  wt_used <- if (weight >= pred_wt) pred_wt else weight
+  age_used <- max(age, 30)
   
   if (sex == "Male") {
-    wt_used * (50.75 - 0.37 * age)
-  } else {
-    (wt_used + 43) * (22.78 - 0.17 * age)
+    ideal_wt <- 0.79 * height - 60.7
+    wt_diff  <- weight - ideal_wt
+    
+    base <- 0.0337 * height - 0.000165 * age_used * height - 1.963
+    
+    vo2_L <- if (weight >= ideal_wt) {
+      base + 0.006 * wt_diff   # actual >= ideal: smaller penalty
+    } else {
+      base + 0.014 * wt_diff   # actual < ideal: wt_diff negative, larger adjustment
+    }
+    
+  } else {  # Female
+    ideal_wt <- 0.65 * height - 42.8
+    wt_diff  <- weight - ideal_wt
+    
+    vo2_L <- 0.001 * height * (14.783 - 0.11 * age_used) + 0.006 * wt_diff
   }
+  
+  vo2_L * 1000  # L/min -> ml/min
 }
 
 # ------------------------------------------------------------
 # FRIEND 2017 (Myers) — outputs ml/kg/min in paper; convert to ml/min here
-# Screenshot formula:
-#   VO2max (ml/kg/min) = 79.9 - 0.39*age - 13.7*gender(0=male,1=female) - 0.127*weight[lbs]
+# VO2max (ml/kg/min) = 79.9 - 0.39*age - 13.7*gender(0=male,1=female) - 0.127*weight[lbs]
 # Converted to ml/min by multiplying by weight (kg).
 # ------------------------------------------------------------
-
 pred_friend2017_myers <- function(sex, age, weight) {
   sex <- normalize_sex(sex)
   
   weight_lbs <- weight * 2.20462
-  gender01 <- if (sex == "Male") 0 else 1
+  gender01   <- if (sex == "Male") 0 else 1
   
   vo2_ml_kg_min <- 79.9 -
     0.39 * age -
@@ -128,15 +140,13 @@ pred_friend2017_myers <- function(sex, age, weight) {
   vo2_ml_kg_min * weight
 }
 
-# -------------------------------------------------------------------
-# friend2018_desouza — Adult reference equation
-# De Souza et al
-# Eur J Prev Cardiol 2018
-# Originally ml/kg/min → converted here to ml/min
-# -------------------------------------------------------------------
-
+# ------------------------------------------------------------
+# FRIEND 2018 (De Souza) — Adult reference equation
+# De Souza et al., Eur J Prev Cardiol 2018
+# Originally ml/kg/min -> converted here to ml/min
+# ------------------------------------------------------------
 pred_friend2018_desouza <- function(sex, age, weight, height, test_mode = "Treadmill") {
-  sex <- normalize_sex(sex)
+  sex       <- normalize_sex(sex)
   test_mode <- normalize_test_mode(test_mode)
   
   weight_lbs <- weight * 2.20462
@@ -156,6 +166,7 @@ pred_friend2018_desouza <- function(sex, age, weight, height, test_mode = "Tread
   vo2_ml_kg_min * weight
 }
 
+
 # ============================================================
 # Generic wrapper: predicted + percent predicted
 # ============================================================
@@ -168,13 +179,12 @@ calc_pred_and_percent <- function(equation,
   
   pred <- switch(
     equation,
-    "cooper_weight"        = pred_cooper_weight(sex, weight),
-    "cooper_height"        = pred_cooper_height(sex, height),
-    "hansen1984"           = pred_hansen1984(sex, age, weight, height),
-    "friend2017_myers"     = pred_friend2017_myers(sex, age, weight),
-    "friend2018_desouza"   = pred_friend2018_desouza(sex, age, weight, height, test_mode)
-
-    stop("Unknown equation. Use: cooper_weight, cooper_height, hansen1984, friend2017_myers, friend2018_desouza")
+    "cooper_weight"      = pred_cooper_weight(sex, weight),
+    "cooper_height"      = pred_cooper_height(sex, height),
+    "hansen2001"         = pred_hansen2001(sex, age, weight, height),
+    "friend2017_myers"   = pred_friend2017_myers(sex, age, weight),
+    "friend2018_desouza" = pred_friend2018_desouza(sex, age, weight, height, test_mode),
+    stop("Unknown equation. Use: cooper_weight, cooper_height, hansen2001, friend2017_myers, friend2018_desouza")
   )
   
   if (!is.finite(pred) || pred <= 0) {
@@ -189,15 +199,15 @@ calc_pred_and_percent <- function(equation,
 # ============================================================
 # Bulk DF calculator
 #   - Adds predicted columns (all ml/min)
-#   - Adds combined pred_VO2 (Hansen if age < 18 else FRIEND2018)
+#   - Adds combined pred_VO2 (Hansen2001 if age < 18 else FRIEND2018)
 #   - Adds perc_pred_VO2 if measured column present
 # ============================================================
 
 add_pred_vo2_columns <- function(DF,
-                                 sex_col = "sex",
-                                 age_col = "Age",
-                                 height_col = "height",
-                                 weight_col = "weight",
+                                 sex_col      = "sex",
+                                 age_col      = "Age",
+                                 height_col   = "height",
+                                 weight_col   = "weight",
                                  test_mode_col = "test_mode",
                                  peak_vo2_col = "Peak_VO2_ml_min") {
   DF <- as.data.frame(DF)
@@ -207,7 +217,7 @@ add_pred_vo2_columns <- function(DF,
   
   sex_norm <- vapply(DF[[sex_col]], normalize_sex, character(1))
   
-  test_mode_vec <- if (test_mode_col %in% names(DF)) DF[[test_mode_col]] else "Treadmill"
+  test_mode_vec  <- if (test_mode_col %in% names(DF)) DF[[test_mode_col]] else "Treadmill"
   test_mode_norm <- vapply(test_mode_vec, normalize_test_mode, character(1))
   
   age    <- DF[[age_col]]
@@ -219,14 +229,14 @@ add_pred_vo2_columns <- function(DF,
   DF$height_in  <- height / 2.54
   
   # predicted columns (ml/min)
-  DF$pred_VO2_cooper_weight      <- mapply(pred_cooper_weight, sex_norm, weight)
-  DF$pred_VO2_cooper_height      <- mapply(pred_cooper_height, sex_norm, height)
-  DF$pred_VO2_hansen1984         <- mapply(pred_hansen1984, sex_norm, age, weight, height)
-  DF$pred_VO2_friend2017_myers   <- mapply(pred_friend2017_myers, sex_norm, age, weight)
+  DF$pred_VO2_cooper_weight      <- mapply(pred_cooper_weight,      sex_norm, weight)
+  DF$pred_VO2_cooper_height      <- mapply(pred_cooper_height,      sex_norm, height)
+  DF$pred_VO2_hansen2001         <- mapply(pred_hansen2001,         sex_norm, age, weight, height)
+  DF$pred_VO2_friend2017_myers   <- mapply(pred_friend2017_myers,   sex_norm, age, weight)
   DF$pred_VO2_friend2018_desouza <- mapply(pred_friend2018_desouza, sex_norm, age, weight, height, test_mode_norm)
-
-  # combined logic: <18 -> Hansen; >=18 -> FRIEND2018 (De Souza)
-  DF$pred_VO2 <- ifelse(age < 18, DF$pred_VO2_hansen1984, DF$pred_VO2_friend2018_desouza)
+  
+  # combined logic: age < 18 -> Hansen2001; age >= 18 -> FRIEND2018 (De Souza)
+  DF$pred_VO2 <- ifelse(age < 18, DF$pred_VO2_hansen2001, DF$pred_VO2_friend2018_desouza)
   
   # percent predicted if measured column exists
   if (peak_vo2_col %in% names(DF)) {
@@ -235,6 +245,7 @@ add_pred_vo2_columns <- function(DF,
   
   DF
 }
+
 
 # ============================================================
 # Interactive calculator (runs only when interactive())
@@ -253,17 +264,17 @@ if (interactive()) {
   cat("\nChoose equation:\n")
   cat("  1 = Cooper 1984 (weight-based, children) [ml/min]\n")
   cat("  2 = Cooper 1984 (height-based, children) [ml/min]\n")
-  cat("  3 = Hansen 1984 (clinical exercise testing) [ml/min]\n")
+  cat("  3 = Hansen/Wasserman 2001 (clinical exercise testing) [ml/min]\n")
   cat("  4 = FRIEND 2017 (Myers; age/sex/weight only; ml/kg/min -> ml/min)\n")
-  cat("  5 = FRIEND 2018 (adult; ml/kg/min -> ml/min) [requires test mode]\n")
-
+  cat("  5 = FRIEND 2018 (De Souza; adult; ml/kg/min -> ml/min) [requires test mode]\n")
+  
   choice <- trimws(readline("Enter 1/2/3/4/5: "))
   
   equation <- switch(
     choice,
     "1" = "cooper_weight",
     "2" = "cooper_height",
-    "3" = "hansen1984",
+    "3" = "hansen2001",
     "4" = "friend2017_myers",
     "5" = "friend2018_desouza",
     stop("Choice must be 1, 2, 3, 4, or 5.")
@@ -277,10 +288,13 @@ if (interactive()) {
   peak_vo2 <- read_num("Measured Peak VO2 (ml/min): ")
   
   res <- calc_pred_and_percent(
-    equation = equation,
-    sex = sex, age = age, weight = weight, height = height,
+    equation        = equation,
+    sex             = sex,
+    age             = age,
+    weight          = weight,
+    height          = height,
     peak_vo2_ml_min = peak_vo2,
-    test_mode = test_mode
+    test_mode       = test_mode
   )
   
   cat("\nRESULTS\n")
