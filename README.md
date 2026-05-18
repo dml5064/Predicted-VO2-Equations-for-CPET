@@ -15,14 +15,18 @@ All predicted values are returned in **ml/min**.
 
 1. **Cooper et al. 1984 (Children)**
    - Weight-based equation  
-   - Height-based equation  
+   - Height-based equation
+Cooper, D. M., and D. Weiler-Ravell. 1984. 'Gas exchange response to exercise in children', Am Rev Respir Dis, 129: S47–8.
 
 2. **Hansen/Wasserman et al. 1984**
-   - Clinical exercise testing reference values  
+   - Clinical exercise testing reference values
+Sietsema, Kathy E, William W Stringer, Darryl Y Sue, and Susan Ward. 2020. Wasserman & Whipp's: Principles of Exercise Testing and Interpretation 6th edition (Lippincott Williams & Wilkins).
 
 3. **FRIEND Registry 2018 (Adults)**
    - Originally ml/kg/min  
-   - Converted internally to ml/min  
+   - Converted internally to ml/min
+de Souza, E. Silva C. G., L. A. Kaminsky, R. Arena, J. W. Christle, C. G. S. Araújo, R. M. Lima, E. A. Ashley, and J. Myers. 2018. 'A reference equation for maximal aerobic power for treadmill and cycle ergometer exercise testing: Analysis from the FRIEND registry', Eur J Prev Cardiol, 25: 742–50.
+
 
 ---
 
