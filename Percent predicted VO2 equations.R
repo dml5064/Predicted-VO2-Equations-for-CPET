@@ -695,105 +695,215 @@ plot_all_vo2_predictions <- function(
 
   if (is.null(main)) {
     main <- sprintf(
-      "Measured and Predicted Peak VO2 (age %.1f, %s)",
+      "Peak VO2 Reference-Equation Comparison\nAge %.1f years | %s ergometry",
       patient_age,
       test_mode
     )
   }
 
-  # Requested styling:
-  # measured = black X
-  # age appropriate = red
-  # outside age range = light/faded red
+  # Keep the equations in the calculator's intended order, but plot from
+  # bottom to top so the first equation appears at the top of the figure.
+  plot_df$plot_y <- rev(seq_len(nrow(plot_df)))
+
+  age_ok <- plot_df$Age_appropriate
+  mode_ok <- plot_df$Mode_appropriate
+
+  # Age appropriateness controls red intensity, as requested.
   point_colors <- ifelse(
-    plot_df$Age_appropriate,
-    "red3",
-    rgb(1, 0.45, 0.45, alpha = 0.35)
+    age_ok,
+    "#C00000",
+    "#F3B3B3"
   )
 
-  y_values <- c(measured_vo2_ml_min, plot_df$Predicted_VO2_ml_min)
-  y_limits <- range(c(0, y_values), finite = TRUE)
-  y_pad <- max(diff(y_limits) * 0.12, 100)
-  y_limits[2] <- y_limits[2] + y_pad
+  # Filled circles = age and mode appropriate.
+  # Filled triangles = age appropriate but test mode differs.
+  # Open circles = outside derivation age range.
+  point_pch <- ifelse(
+    !age_ok,
+    1,
+    ifelse(mode_ok, 19, 17)
+  )
+
+  all_values <- c(measured_vo2_ml_min, plot_df$Predicted_VO2_ml_min)
+  x_range <- range(all_values, finite = TRUE)
+  x_span <- diff(x_range)
+  if (!is.finite(x_span) || x_span == 0) x_span <- max(x_range[2] * 0.20, 500)
+
+  # Extra margin on both sides inside the plotting region for value
+  # labels: predictions below measured VO2 get their label drawn to the
+  # left (pos = 2), predictions at/above get theirs drawn to the right
+  # (pos = 4), so both edges need room reserved for label text.
+  x_limits <- c(
+    max(0, x_range[1] - 0.28 * x_span),
+    x_range[2] + 0.33 * x_span
+  )
 
   old_par <- par(no.readonly = TRUE)
   on.exit(par(old_par), add = TRUE)
-  par(mar = c(11, 5, 4, 2) + 0.1)
-
-  x <- seq_len(nrow(plot_df))
-  plot(
-    x,
-    plot_df$Predicted_VO2_ml_min,
-    type = "n",
-    xaxt = "n",
-    xlab = "",
-    ylab = "Peak VO2 (ml/min)",
-    ylim = y_limits,
-    main = main
+  par(
+    mar = c(5.2, 12.5, 5.0, 2.0) + 0.1,
+    xaxs = "i",
+    yaxs = "i"
   )
 
-  abline(h = measured_vo2_ml_min, col = "black", lty = 3, lwd = 1)
+  # x_limits (computed above) already reserves extra right-side margin
+  # for the value labels; use it directly instead of recomputing a
+  # symmetric buffer that doesn't account for label width.
+  x_min <- x_limits[1]
+  x_max <- x_limits[2]
+
+  plot(
+    xlim = c(x_min, x_max),
+    NA,
+    ylim = c(0.45, nrow(plot_df) + 0.75),
+    xlab = "Peak VO2 (ml/min)",
+    ylab = "",
+    yaxt = "n",
+    main = main,
+    bty = "o",
+    las = 1
+  )
+
+  # Light row guides improve comparison without dominating the figure.
+  abline(
+    h = plot_df$plot_y,
+    col = "grey92",
+    lwd = 1
+  )
+
+  # Measured VO2 is the common clinical reference, not another category.
+  abline(
+    v = measured_vo2_ml_min,
+    col = "black",
+    lty = 3,
+    lwd = 1.4
+  )
+
+  # Short segments show the direction and magnitude of each difference.
+  segments(
+    x0 = measured_vo2_ml_min,
+    y0 = plot_df$plot_y,
+    x1 = plot_df$Predicted_VO2_ml_min,
+    y1 = plot_df$plot_y,
+    col = ifelse(age_ok, "#D9A0A0", "#F1DADA"),
+    lwd = 2
+  )
 
   points(
-    x,
     plot_df$Predicted_VO2_ml_min,
-    pch = 19,
-    cex = 1.35,
+    plot_df$plot_y,
+    pch = point_pch,
+    cex = ifelse(age_ok, 1.35, 1.20),
+    lwd = ifelse(age_ok, 1.2, 1.6),
     col = point_colors
   )
 
-  # Place the measured value at the left as a black X.
+  # A black X at the top of the measured reference line.
   points(
-    0.35,
     measured_vo2_ml_min,
+    nrow(plot_df) + 0.48,
     pch = 4,
-    cex = 1.8,
-    lwd = 2.4,
-    col = "black"
+    cex = 1.55,
+    lwd = 2.3,
+    col = "black",
+    xpd = NA
+  )
+  label_gap <- max(20, 0.015 * (x_max - x_min))
+  label_x <- rep(NA_real_, nrow(results))
+  finite_labels <- is.finite(results$Predicted_VO2_ml_min)
+
+  label_x[finite_labels] <- pmin(
+    results$Predicted_VO2_ml_min[finite_labels] + label_gap,
+    measured_vo2_ml_min - label_gap
+  )
+  right_of_measured <- is.finite(results$Predicted_VO2_ml_min) &
+    results$Predicted_VO2_ml_min >= measured_vo2_ml_min
+
+  label_x[right_of_measured] <-
+    results$Predicted_VO2_ml_min[right_of_measured] + label_gap
+
+  text(
+    adj = 0,
+    measured_vo2_ml_min,
+    nrow(plot_df) + 0.48,
+    labels = sprintf("  Measured: %.0f ml/min", measured_vo2_ml_min),
+    pos = 4,
+    cex = 0.82,
+    font = 2,
+    col = "black",
+    xpd = NA
   )
 
   axis(
-    1,
-    at = c(0.35, x),
-    labels = c("Measured", plot_df$Equation),
-    las = 2,
-    cex.axis = 0.72
+    2,
+    at = plot_df$plot_y,
+    labels = plot_df$Equation,
+    las = 1,
+    tick = FALSE,
+    cex.axis = 0.82,
+    line = -0.4
   )
 
+  # Label each point with absolute prediction and percent predicted.
+  value_labels <- ifelse(
+    is.finite(plot_df$Percent_predicted),
+    sprintf(
+      "%.0f ml/min  |  %.0f%% predicted",
+      plot_df$Predicted_VO2_ml_min,
+      plot_df$Percent_predicted
+    ),
+    sprintf("%.0f ml/min", plot_df$Predicted_VO2_ml_min)
+  )
+  
+  # Place labels below their corresponding points.
   text(
-    x,
-    plot_df$Predicted_VO2_ml_min,
-    labels = sprintf("%.0f", plot_df$Predicted_VO2_ml_min),
-    pos = 3,
-    cex = 0.70,
-    col = point_colors
+    x = plot_df$Predicted_VO2_ml_min,
+    y = plot_df$plot_y,
+    labels = value_labels,
+    pos = 1,
+    offset = 0.55,
+    cex = 0.73,
+    col = ifelse(age_ok, "#8B0000", "#C98F8F"),
+    xpd = FALSE
   )
 
+  # Place labels below their corresponding points.
   text(
-    0.35,
-    measured_vo2_ml_min,
-    labels = sprintf("%.0f", measured_vo2_ml_min),
-    pos = 3,
-    cex = 0.75,
-    col = "black"
+    x = plot_df$Predicted_VO2_ml_min,
+    y = plot_df$plot_y,
+    labels = value_labels,
+    pos = 1,
+    offset = 0.55,
+    cex = 0.73,
+    col = ifelse(age_ok, "#8B0000", "#C98F8F"),
+    xpd = FALSE
   )
 
   legend(
-    "topright",
+    bg = "white",
+    box.col = "black",
+    bty = "o",
+    "bottomright",
+    inset = c(0.01, 0.01),
     legend = c(
-      "Measured VO2",
-      "Age appropriate equation",
-      "Outside derivation age range"
+      "Age and mode appropriate",
+      "Age appropriate; mode differs",
+      "Outside derivation age range",
+      "Measured VO2"
     ),
-    pch = c(4, 19, 19),
-    col = c(
-      "black",
-      "red3",
-      rgb(1, 0.45, 0.45, alpha = 0.35)
-    ),
-    pt.lwd = c(2.4, 1, 1),
-    bty = "n",
-    cex = 0.80
+    pch = c(19, 17, 1, 4),
+    col = c("#C00000", "#C00000", "#F3B3B3", "black"),
+    pt.cex = c(1.1, 1.1, 1.1, 1.2),
+    pt.lwd = c(1, 1, 1.5, 2),
+    cex = 0.74
+  )
+
+  mtext(
+    "Red intensity indicates age applicability; horizontal distance from the dotted line shows disagreement with measured VO2.",
+    side = 1,
+    line = 3.7,
+    cex = 0.68,
+    col = "grey35"
   )
 
   invisible(plot_df)
@@ -844,6 +954,52 @@ print_vo2_prediction_results <- function(results, measured_vo2_ml_min) {
 }
 
 
+
+# ------------------------------------------------------------
+# Tibble formatting helper
+# ------------------------------------------------------------
+as_nice_vo2_tibble <- function(results_df) {
+  display <- results_df
+
+  display$Predicted_VO2_ml_min <- round(
+    as.numeric(display$Predicted_VO2_ml_min),
+    0
+  )
+  display$Percent_predicted <- round(
+    as.numeric(display$Percent_predicted),
+    1
+  )
+
+  display <- display[, c(
+    "Equation",
+    "Predicted_VO2_ml_min",
+    "Percent_predicted",
+    "Age_appropriate",
+    "Mode_appropriate",
+    "Overall_applicable",
+    "Age_range",
+    "Status"
+  ), drop = FALSE]
+
+  names(display) <- c(
+    "Equation",
+    "Predicted VO2 (ml/min)",
+    "Percent predicted",
+    "Age appropriate",
+    "Mode appropriate",
+    "Overall appropriate",
+    "Derivation age range",
+    "Interpretation"
+  )
+
+  if (requireNamespace("tibble", quietly = TRUE)) {
+    tibble::as_tibble(display)
+  } else {
+    display
+  }
+}
+
+
 # ============================================================
 # Interactive calculator: runs when the file is sourced
 # interactively in R/RStudio
@@ -877,10 +1033,101 @@ if (interactive()) {
     test_mode = test_mode
   )
 
-  print_vo2_prediction_results(
-    results = all_vo2_results,
-    measured_vo2_ml_min = peak_vo2
+
+  # Create and display a clean tibble-style summary.
+
+  # ----------------------------------------------------------
+  # Compact console output
+  # ----------------------------------------------------------
+  console_summary <- data.frame(
+    Equation = all_vo2_results$Equation,
+    Pred_ml_min = round(all_vo2_results$Predicted_VO2_ml_min, 0),
+    Percent_pred = round(all_vo2_results$Percent_predicted, 1),
+    Age_OK = ifelse(all_vo2_results$Age_appropriate, "Yes", "No"),
+    Mode_OK = ifelse(all_vo2_results$Mode_appropriate, "Yes", "No"),
+    Status = all_vo2_results$Status,
+    stringsAsFactors = FALSE,
+    check.names = FALSE
   )
+
+  # Shorten labels only for console readability.
+  console_summary$Equation <- sub(
+    "Koch 2009 / SHIP \\(Pistea implementation\\)",
+    "Koch 2009 / SHIP",
+    console_summary$Equation
+  )
+
+  console_summary$Status <- ifelse(
+    console_summary$Status == "Outside derivation age range",
+    "Outside age range",
+    ifelse(
+      console_summary$Status == "Not calculable for entered age",
+      "Not calculable",
+      console_summary$Status
+    )
+  )
+
+  cat("\nMEASURED PEAK VO2\n")
+  cat("-----------------\n")
+  cat(sprintf("%.1f ml/min\n", peak_vo2))
+
+  cat("\nPREDICTION SUMMARY\n")
+  cat("------------------\n")
+  print(
+    console_summary,
+    row.names = FALSE,
+    right = FALSE,
+    max = nrow(console_summary)
+  )
+
+  age_reference <- data.frame(
+    Equation = all_vo2_results$Equation,
+    Age_range = all_vo2_results$Age_range,
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+
+  age_reference$Equation <- sub(
+    "Koch 2009 / SHIP \\(Pistea implementation\\)",
+    "Koch 2009 / SHIP",
+    age_reference$Equation
+  )
+
+  cat("\nDERIVATION AGE RANGES\n")
+  cat("---------------------\n")
+  for (i in seq_len(nrow(age_reference))) {
+    cat(sprintf(
+      "%-29s %s\n",
+      age_reference$Equation[i],
+      age_reference$Age_range[i]
+    ))
+  }
+
+  primary_equation <- if (age < 18) {
+    "Cooper 1984 height-based"
+  } else {
+    "FRIEND 2018 De Souza"
+  }
+
+  cat("\nPRIMARY AUTOMATIC EQUATION\n")
+  cat("--------------------------\n")
+  cat(primary_equation, "\n")
+
+  last_vo2_console_summary <- console_summary
+  last_vo2_age_reference <- age_reference
+
+  last_vo2_tibble <- as_nice_vo2_tibble(all_vo2_results)
+
+
+  if (exists("last_vo2_tibble")) {
+    last_vo2_tibble_compact <- if (
+      requireNamespace("tibble", quietly = TRUE)
+    ) {
+      tibble::as_tibble(console_summary)
+    } else {
+      console_summary
+    }
+  }
 
   plot_all_vo2_predictions(
     results = all_vo2_results,
@@ -901,7 +1148,14 @@ if (interactive()) {
 
   assign("last_vo2_inputs", last_vo2_inputs, envir = .GlobalEnv)
   assign("last_vo2_results", all_vo2_results, envir = .GlobalEnv)
+  assign("last_vo2_tibble", last_vo2_tibble, envir = .GlobalEnv)
+  assign("last_vo2_console_summary", console_summary, envir = .GlobalEnv)
+  assign("last_vo2_age_reference", age_reference, envir = .GlobalEnv)
+  if (exists("last_vo2_tibble_compact")) {
+    assign("last_vo2_tibble_compact", last_vo2_tibble_compact, envir = .GlobalEnv)
+  }
 
   cat("Results are also available as: last_vo2_results\n")
+  cat("Formatted tibble is available as: last_vo2_tibble\n")
   cat("Inputs are also available as:  last_vo2_inputs\n\n")
 }
