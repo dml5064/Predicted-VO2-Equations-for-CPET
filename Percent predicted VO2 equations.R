@@ -5,7 +5,7 @@
 #   1) Cooper 1984 (weight-based, children)  -> ml/min
 #   2) Cooper 1984 (height-based, children)  -> ml/min
 #   3) Hansen/Wasserman 2001 (textbook clinical ET) -> ml/min
-#   4) Wasserman 1999 simplified (Pistea 2016 table; cycle) -> ml/min
+#   4) Wasserman 1999 simplified (Pistea table; cycle) -> ml/min
 #   5) FRIEND 2017 (Myers; ml/kg/min -> ml/min)
 #   6) FRIEND 2018 (De Souza; ml/kg/min -> ml/min; treadmill/cycle)
 #   7) Blackie 1989 (adults >55 years; cycle ergometry) -> ml/min
@@ -230,8 +230,17 @@ pred_friend2018_desouza <- function(
 pred_blackie1989 <- function(sex, age, weight, height) {
   sex <- normalize_sex(sex)
 
-  if (!is.finite(age) || age <= 55) {
-    stop("Blackie 1989 is intended for adults older than 55 years.")
+  if (!is.finite(age)) {
+    stop("Age must be finite for Blackie 1989.")
+  }
+
+  if (age <= 55 || age > 80) {
+    warning(
+      paste(
+        "Blackie 1989 was derived in adults aged 56-80 years;",
+        "this prediction is an extrapolation."
+      )
+    )
   }
 
   if (sex == "Male") {
@@ -289,12 +298,16 @@ pred_jones1985 <- function(sex, age, height) {
 pred_koch2009_pistea <- function(sex, age, weight, height) {
   sex <- normalize_sex(sex)
 
-  if (!is.finite(age) || age <= 65) {
-    stop(
+  if (!is.finite(age)) {
+    stop("Age must be finite for the Koch 2009 / SHIP equation.")
+  }
+
+  if (age <= 65 || age > 80) {
+    warning(
       paste(
-        "The Pistea-table Koch 2009 implementation is restricted",
-        "to adults older than 65 years because the table only provides",
-        "the age-category code for that group."
+        "The current Pistea-table Koch implementation uses the",
+        "age >65 category code and is being extrapolated outside",
+        "the 66-80-year applicability range."
       )
     )
   }
@@ -511,23 +524,25 @@ add_pred_vo2_columns <- function(
     height
   )
 
-  # Koch/Pistea can only be calculated with the age >65 category
-  # explicitly supplied in the Pistea table.
+  # Calculate Koch/SHIP for all finite inputs. Outside ages 66-80,
+  # the Pistea age >65 category implementation is retained as an
+  # extrapolation and flagged as age-inappropriate in the plot.
   DF$pred_VO2_koch2009_pistea <- mapply(
     function(sex_i, age_i, weight_i, height_i) {
       if (
         any(is.na(c(age_i, weight_i, height_i))) ||
-        !is.finite(age_i) ||
-        age_i <= 65
+        !is.finite(age_i)
       ) {
         return(NA_real_)
       }
 
-      pred_koch2009_pistea(
-        sex = sex_i,
-        age = age_i,
-        weight = weight_i,
-        height = height_i
+      suppressWarnings(
+        pred_koch2009_pistea(
+          sex = sex_i,
+          age = age_i,
+          weight = weight_i,
+          height = height_i
+        )
       )
     },
     sex_norm,
@@ -547,23 +562,25 @@ add_pred_vo2_columns <- function(
     age
   )
 
-  # Calculate Blackie only when age >55.
-  # Cycle mode is enforced when selecting the combined equation.
+  # Calculate Blackie for all finite inputs. Values outside the
+  # 56-80-year derivation range are retained as extrapolations and are
+  # flagged as age-inappropriate in the single-patient results/plot.
   DF$pred_VO2_blackie1989 <- mapply(
     function(sex_i, age_i, weight_i, height_i) {
       if (
         any(is.na(c(age_i, weight_i, height_i))) ||
-        !is.finite(age_i) ||
-        age_i <= 55
+        !is.finite(age_i)
       ) {
         return(NA_real_)
       }
 
-      pred_blackie1989(
-        sex = sex_i,
-        age = age_i,
-        weight = weight_i,
-        height = height_i
+      suppressWarnings(
+        pred_blackie1989(
+          sex = sex_i,
+          age = age_i,
+          weight = weight_i,
+          height = height_i
+        )
       )
     },
     sex_norm,
@@ -644,7 +661,7 @@ calculate_all_vo2_predictions <- function(
     "Jones 1985" = safe_prediction(
       pred_jones1985(sex, age, height)
     ),
-    "Koch 2009 / SHIP (Pistea implementation)" = safe_prediction(
+    "Koch 2009 / SHIP" = safe_prediction(
       pred_koch2009_pistea(sex, age, weight, height)
     ),
     "Hakola 2011" = safe_prediction(
@@ -720,7 +737,7 @@ calculate_all_vo2_predictions <- function(
         "Age appropriate",
         "Age appropriate; mode differs"
       ),
-      "Outside derivation age range"
+      "Outside derivation age range; extrapolated"
     )
   )
 
@@ -731,10 +748,25 @@ plot_all_vo2_predictions <- function(
   results,
   measured_vo2_ml_min,
   patient_age,
+  patient_sex,
+  patient_height_cm,
+  patient_weight_kg,
   test_mode,
   main = NULL
 ) {
   keep <- is.finite(results$Predicted_VO2_ml_min)
+
+  if (!all(keep)) {
+    missing_equations <- results$Equation[!keep]
+    warning(
+      paste(
+        "The following equations could not be plotted because their",
+        "predictions were non-finite:",
+        paste(missing_equations, collapse = ", ")
+      )
+    )
+  }
+
   plot_df <- results[keep, , drop = FALSE]
 
   if (nrow(plot_df) == 0) {
@@ -743,9 +775,16 @@ plot_all_vo2_predictions <- function(
 
   if (is.null(main)) {
     main <- sprintf(
-      "Peak VO2 Reference-Equation Comparison\nAge %.1f years | %s ergometry",
+      paste0(
+        "Peak VO2 Reference-Equation Comparison\n",
+        "Age %.1f years | %s ergometry\n",
+        "%s | Height %.1f cm | Weight %.1f kg"
+      ),
       patient_age,
-      test_mode
+      test_mode,
+      patient_sex,
+      patient_height_cm,
+      patient_weight_kg
     )
   }
 
@@ -1102,7 +1141,7 @@ if (interactive()) {
   )
 
   console_summary$Status <- ifelse(
-    console_summary$Status == "Outside derivation age range",
+    console_summary$Status == "Outside derivation age range; extrapolated",
     "Outside age range",
     ifelse(
       console_summary$Status == "Not calculable for entered age",
@@ -1177,6 +1216,9 @@ if (interactive()) {
     results = all_vo2_results,
     measured_vo2_ml_min = peak_vo2,
     patient_age = age,
+    patient_sex = sex,
+    patient_height_cm = height,
+    patient_weight_kg = weight,
     test_mode = test_mode
   )
 
