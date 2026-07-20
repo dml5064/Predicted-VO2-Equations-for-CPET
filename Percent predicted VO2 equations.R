@@ -4,13 +4,14 @@
 # Equations (all return ml/min unless noted):
 #   1) Cooper 1984 (weight-based, children)  -> ml/min
 #   2) Cooper 1984 (height-based, children)  -> ml/min
-#   3) Hansen/Wasserman 2001 (clinical ET)   -> ml/min
-#   4) FRIEND 2017 (Myers; ml/kg/min -> ml/min)
-#   5) FRIEND 2018 (De Souza; ml/kg/min -> ml/min; treadmill/cycle)
-#   6) Blackie 1989 (adults >55 years; cycle ergometry) -> ml/min
-#   7) Jones 1985 (cycle ergometry) -> ml/min
-#   8) Koch 2009 / SHIP (age >65 implementation from Pistea table) -> ml/min
-#   9) Hakola 2011 (ages 57-78; cycle ergometry) -> ml/min
+#   3) Hansen/Wasserman 2001 (textbook clinical ET) -> ml/min
+#   4) Wasserman 1999 simplified (Pistea 2016 table; cycle) -> ml/min
+#   5) FRIEND 2017 (Myers; ml/kg/min -> ml/min)
+#   6) FRIEND 2018 (De Souza; ml/kg/min -> ml/min; treadmill/cycle)
+#   7) Blackie 1989 (adults >55 years; cycle ergometry) -> ml/min
+#   8) Jones 1985 (cycle ergometry) -> ml/min
+#   9) Koch 2009 / SHIP (age >65 implementation from Pistea table) -> ml/min
+#  10) Hakola 2011 (ages 57-78; cycle ergometry) -> ml/min
 #
 # Units expected:
 #   sex               = Male/Female (or M/F; normalized)
@@ -126,6 +127,36 @@ pred_hansen2001 <- function(sex, age, weight, height) {
   }
 
   vo2_L * 1000
+}
+
+# ------------------------------------------------------------
+# Wasserman 1999 simplified equations
+# Reproduced in Pistea et al. Table 1
+# Cycle ergometry
+#
+# Men:
+#   VO2max = (50.72 - 0.372*age) * weight
+#
+# Women:
+#   VO2max = (22.78 - 0.17*age) * (weight + 43)
+#
+# Inputs:
+#   age    = years
+#   weight = kg
+#
+# Output: ml/min
+#
+# This is retained as a separate equation and does not replace the
+# Hansen/Wasserman textbook implementation above.
+# ------------------------------------------------------------
+pred_wasserman1999_simplified <- function(sex, age, weight) {
+  sex <- normalize_sex(sex)
+
+  if (sex == "Male") {
+    (50.72 - 0.372 * age) * weight
+  } else {
+    (22.78 - 0.17 * age) * (weight + 43)
+  }
 }
 
 # ------------------------------------------------------------
@@ -334,6 +365,9 @@ calc_pred_and_percent <- function(
     "cooper_weight"      = pred_cooper_weight(sex, weight),
     "cooper_height"      = pred_cooper_height(sex, height),
     "hansen2001"         = pred_hansen2001(sex, age, weight, height),
+    "wasserman1999_simplified" = pred_wasserman1999_simplified(
+      sex, age, weight
+    ),
     "friend2017_myers"   = pred_friend2017_myers(sex, age, weight),
     "friend2018_desouza" = pred_friend2018_desouza(
       sex, age, weight, height, test_mode
@@ -354,7 +388,8 @@ calc_pred_and_percent <- function(
       paste(
         "Unknown equation. Use:",
         "cooper_weight, cooper_height, hansen2001,",
-        "friend2017_myers, friend2018_desouza, blackie1989,",
+        "wasserman1999_simplified, friend2017_myers,",
+        "friend2018_desouza, blackie1989,",
         "jones1985, koch2009_pistea, hakola2011"
       )
     )
@@ -444,6 +479,13 @@ add_pred_vo2_columns <- function(
     age,
     weight,
     height
+  )
+
+  DF$pred_VO2_wasserman1999_simplified <- mapply(
+    pred_wasserman1999_simplified,
+    sex_norm,
+    age,
+    weight
   )
 
   DF$pred_VO2_friend2017_myers <- mapply(
@@ -587,6 +629,9 @@ calculate_all_vo2_predictions <- function(
     "Hansen/Wasserman 2001" = safe_prediction(
       pred_hansen2001(sex, age, weight, height)
     ),
+    "Wasserman 1999 simplified" = safe_prediction(
+      pred_wasserman1999_simplified(sex, age, weight)
+    ),
     "FRIEND 2017 Myers" = safe_prediction(
       pred_friend2017_myers(sex, age, weight)
     ),
@@ -611,6 +656,7 @@ calculate_all_vo2_predictions <- function(
     age < 18,
     age < 18,
     age >= 18,
+    if (sex == "Male") age >= 34 && age <= 74 else age >= 29 && age <= 73,
     age >= 18,
     age >= 18,
     age > 55 && age <= 80,
@@ -623,6 +669,7 @@ calculate_all_vo2_predictions <- function(
     TRUE,
     TRUE,
     TRUE,
+    test_mode == "Cycle",
     TRUE,
     TRUE,
     test_mode == "Cycle",
@@ -635,6 +682,7 @@ calculate_all_vo2_predictions <- function(
     "<18 years",
     "<18 years",
     "Adults; age 30 substituted when younger than 30",
+    if (sex == "Male") "34-74 years" else "29-73 years",
     ">=18 years",
     ">=18 years",
     "56-80 years",
@@ -854,29 +902,25 @@ plot_all_vo2_predictions <- function(
     ),
     sprintf("%.0f ml/min", plot_df$Predicted_VO2_ml_min)
   )
-  
-  # Place labels below their corresponding points.
-  text(
-    x = plot_df$Predicted_VO2_ml_min,
-    y = plot_df$plot_y,
-    labels = value_labels,
-    pos = 1,
-    offset = 0.55,
-    cex = 0.73,
-    col = ifelse(age_ok, "#8B0000", "#C98F8F"),
-    xpd = FALSE
+
+  # Put labels away from the measured-reference line:
+  # predictions below measured VO2 are labeled on the left;
+  # predictions at or above measured VO2 are labeled on the right.
+  label_position <- ifelse(
+    plot_df$Predicted_VO2_ml_min < measured_vo2_ml_min,
+    2,
+    4
   )
 
-  # Place labels below their corresponding points.
   text(
-    x = plot_df$Predicted_VO2_ml_min,
-    y = plot_df$plot_y,
+    plot_df$Predicted_VO2_ml_min,
+    plot_df$plot_y,
     labels = value_labels,
-    pos = 1,
-    offset = 0.55,
+    pos = label_position,
+    offset = 0.65,
     cex = 0.73,
     col = ifelse(age_ok, "#8B0000", "#C98F8F"),
-    xpd = FALSE
+    xpd = NA
   )
 
   legend(
